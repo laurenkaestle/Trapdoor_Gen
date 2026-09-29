@@ -35,7 +35,7 @@ void write_array_to_file(int8_t f[ANTRAG_D], const char *filename) {
     fclose(file);
 }
 
-void simple_frand(double *r, uint64_t *buf, size_t n) {
+static void simple_frand(double *r, uint64_t *buf, size_t n) {
     // static const double pow2m64 = pow(2,-64);
     static const double pow2m64 = 5.42101086242752217e-20;
     randombytes((uint8_t*)buf, n*sizeof(uint64_t));
@@ -59,7 +59,7 @@ void simple_frand(double *r, uint64_t *buf, size_t n) {
  * are not aiming for a constant-time keygen), but this is
  * straightforward to fix if deemed necessary.
  */
-void decode_odd(int8_t u[ANTRAG_D], const poly *utilde)
+static void decode_odd(int8_t u[ANTRAG_D], const poly *utilde)
 {
     uint8_t umod2 = 0;
     int8_t ui, wi = 0;

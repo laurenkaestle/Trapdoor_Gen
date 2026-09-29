@@ -19,10 +19,6 @@ void sign(const uint8_t* m, const secret_key* sk, signature* s);
 int verify(uint8_t* m, public_key* pk, signature* s);
 void sampler(const secret_key* sk, const poly* c1, const poly* c2, poly* v0, poly* v1);
 
-// to use in all keygen files
-void simple_frand(double *r, uint64_t *buf, size_t n);
-void decode_odd(int8_t u[ANTRAG_D], const poly *utilde);
-
 /* Constant-time macros */
 #define LSBMASK(c)      (-((c)&1))
 #define CMUX(x,y,c)     (((x)&(LSBMASK(c)))^((y)&(~LSBMASK(c))))
