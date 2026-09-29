@@ -81,25 +81,36 @@ void speed_keygen(){
 
 }
 */
-int test_gibbs(){
+
+/**
+ * Function to test speed and cycles of trapdoor sampling with a specified algorithm
+ */
+int test_gibbs(enum Algorithm alg){
   srand(time(0));
   seed_rng();
-  printf("Hello world, signature is Gibbs-Falcon-%u\n", ANTRAG_D);
+  printf("Hello world, signature is %s-%u\n", (alg == GIBBS) ? "Gibbs-Falcon" : "Blocked-Gibbs-Falcon", ANTRAG_D);
   secret_key sk;
   public_key pk;
   signature s;
+
+  // function pointer based on algorithm choice
+  if (alg != GIBBS && alg != BLOCK) { // add DE once implemented
+    printf("Error: Unknown algorithm type\n");
+    return -1;
+  }
 
   uint8_t m[32] = {0x46,0xb6,0xc4,0x83,0x3f,0x61,0xfa,0x3e,0xaa,0xe9,0xad,0x4a,0x68,0x8c,0xd9,0x6e,0x22,0x6d,0x93,0x3e,0xde,0xc4,0x64,0x9a,0xb2,0x18,0x45,0x2,0xad,0xf3,0xc,0x61};
   
   printf("\n* Generate initial key pair.\n");
   // keygen_full(&sk, &pk);
-  int res_trials = keygen_fg(&sk);
+
+  int res_trials = keygen_fg(&sk, alg);
   printf("  res_trials = %d\n", res_trials);
   printf("  ...done.\n\n");
  
 #define KEYGEN_TESTS 100
   printf("* Test keygen repetitions (alpha=%.3f, tests=%d, N=%d).\n\n",
-    ANTRAG_ALPHA, KEYGEN_TESTS, Gibbs_N);
+    ANTRAG_ALPHA, KEYGEN_TESTS, (alg == GIBBS) ? Gibbs_N : Blocked_N);
 
   printf("                       min  lowq  med.  uppq   max  avg.\n");
   printf("----------------------------------------------------------\n");
@@ -107,7 +118,7 @@ int test_gibbs(){
   int trials[KEYGEN_TESTS];
   double trialsavg = 0.;
   for(int i=0; i<KEYGEN_TESTS; i++) {
-    trials[i] = keygen_fg(&sk);
+    trials[i] = keygen_fg(&sk, alg);
     trialsavg += trials[i];
   }
   qsort(trials, KEYGEN_TESTS, sizeof(int), intcmp);
@@ -132,7 +143,7 @@ int test_gibbs(){
     clock_t start_time = clock();
     uint64_t start = cpucycles();
     // keygen_full(&sk, &pk);
-    keygen_fg(&sk);
+    keygen_fg(&sk, alg);
     uint64_t stop = cpucycles();
     clock_t stop_time = clock();
 
@@ -327,7 +338,8 @@ int main(){
 
   //=======================================================================
 
-  test_gibbs();
+  test_gibbs(GIBBS);
+  test_gibbs(BLOCK);
   
   return 0;
 }

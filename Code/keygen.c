@@ -2,10 +2,17 @@
 #include "api.h"
 #include "poly.h"
 #include "randombytes.h"
+#define _USE_MATH_DEFINES
 #include <math.h>
+//#include <x86intrin.h>
+#ifdef _MSC_VER
+#include <intrin.h>
+#else
 #include <x86intrin.h>
+#endif
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 
 void write_array_to_file(int8_t f[ANTRAG_D], const char *filename) {
@@ -28,8 +35,9 @@ void write_array_to_file(int8_t f[ANTRAG_D], const char *filename) {
     fclose(file);
 }
 
-static void simple_frand(double *r, uint64_t *buf, size_t n) {
-    static const double pow2m64 = pow(2,-64);
+void simple_frand(double *r, uint64_t *buf, size_t n) {
+    // static const double pow2m64 = pow(2,-64);
+    static const double pow2m64 = 5.42101086242752217e-20;
     randombytes((uint8_t*)buf, n*sizeof(uint64_t));
     for(size_t i=0; i<n; i++) {
 	     r[i] = ((double)buf[i]) * pow2m64;
@@ -51,7 +59,7 @@ static void simple_frand(double *r, uint64_t *buf, size_t n) {
  * are not aiming for a constant-time keygen), but this is
  * straightforward to fix if deemed necessary.
  */
-static void decode_odd(int8_t u[ANTRAG_D], const poly *utilde)
+void decode_odd(int8_t u[ANTRAG_D], const poly *utilde)
 {
     uint8_t umod2 = 0;
     int8_t ui, wi = 0;
@@ -117,7 +125,56 @@ double update_xi(int d, double alpha, double *x, int i, double _r) {  //double?
 	return lower_bound + (upper_bound - lower_bound) * _r;
 }
 
-int keygen_fg(secret_key *sk)
+/**
+ * Function to update coefficients xi and xj based on joint 
+ * conditional distribution conditioned on other coefficients
+ */
+int update_xi_xj(int d, double alpha, double *x, int i, int j, double *r) {
+    double sum_other_x = 0.0;
+    double sum_other_x_inv = 0.0;
+    int tries = 0;
+    double xi, xj;
+
+    for (int k = 0; k < d / 2; k++) {
+        if (k != i && k != j) {
+            sum_other_x += x[k];
+            sum_other_x_inv += (1.0 / x[k]);
+        }
+    }
+
+    double max_sum = d / 2.0 * alpha * alpha;
+    
+    double lower_bound = 1.0 / (max_sum - sum_other_x_inv);
+    double upper_bound = max_sum - sum_other_x;
+    double bound_diff = upper_bound - lower_bound;
+
+    // sample xi from region
+    xi = lower_bound + bound_diff * r[i];  
+    // sample xj from region based on xi
+    double new_lower_bound = 1.0 / (max_sum - sum_other_x_inv - 1.0 / xi);
+    xj = new_lower_bound + ((max_sum - sum_other_x - xi) - new_lower_bound) * r[j];
+
+    /*do {
+        xi = lower_bound + bound_diff * r[i];
+        xj = lower_bound + bound_diff * r[j];
+        tries++;
+        if ((xi + xj + sum_other_x <= max_sum) &&
+            (1.0 / xi + 1.0 / xj + sum_other_x_inv <= max_sum)) {
+            // conditions met, update xi and xj and exit loop
+            x[i] = xi;
+            x[j] = xj;
+            break;
+        }
+        // sample again by generating new random numbers
+        // update r[i]
+        r[i] = (double)rand() / ((double)RAND_MAX + 1.0);
+        r[j] = (double)rand() / ((double)RAND_MAX + 1.0);
+    } while (1);*/
+
+    return tries;
+}
+
+int keygen_fg(secret_key *sk, enum Algorithm alg)
 {
     // double theta[ANTRAG_D/2], gamma_f[ANTRAG_D/2], gamma_g[ANTRAG_D/2]
     double z[ANTRAG_D/2], af[ANTRAG_D/2], ag[ANTRAG_D/2], f[ANTRAG_D], g[ANTRAG_D];
@@ -145,12 +202,24 @@ int keygen_fg(secret_key *sk)
 	double _r[ANTRAG_D / 2];
 	uint64_t _rint[ ANTRAG_D / 2];
 	
-    for (int k = 0; k < Gibbs_N; k++) {
-		simple_frand(_r, _rint, ANTRAG_D / 2);
-		// printf("Every _r: %lf\n", _r[0]);
-        for (int i = 0; i < ANTRAG_D / 2; i++) {
-            // 更新 x 中的第 i 个元素
-            x[i] = update_xi(ANTRAG_D, ANTRAG_ALPHA, x, i, _r[i]);
+    if (alg == GIBBS) {
+        for (int k = 0; k < Gibbs_N; k++) {
+		    simple_frand(_r, _rint, ANTRAG_D / 2);
+		    // printf("Every _r: %lf\n", _r[0]);
+            for (int i = 0; i < ANTRAG_D / 2; i++) {
+                // 更新 x 中的第 i 个元素
+                x[i] = update_xi(ANTRAG_D, ANTRAG_ALPHA, x, i, _r[i]);
+            }
+        }
+    } else {
+        // should be BLOCK (for now)
+        for (int k = 0; k < Blocked_N; k++) {
+            // iterations of blocked Gibbs algorithm until reaching convergence
+            simple_frand(r, rint, ANTRAG_D / 2);
+            for (int i = 0; i < ANTRAG_D; i += 2) {
+                // call update_xi_xj, pass in pointers to xi and xj?
+                update_xi_xj(ANTRAG_D, ANTRAG_ALPHA, x, i, i+1, r);
+            }
         }
     }
 

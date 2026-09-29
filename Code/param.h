@@ -11,6 +11,7 @@
 // #define R_SQUARE 1.9321  //R^2
 
 #define Gibbs_N 2500
+#define Blocked_N 2500  // for testing, will update based on final convergence calculation
 
 /* sigma^2 = r^2 * alpha^2 * q */
 /* gamma^2 = slack^2 * sigma^2 * 2d */

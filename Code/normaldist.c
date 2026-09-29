@@ -1,9 +1,18 @@
 #include "normaldist.h"
 #include "api.h"
 #include "randombytes.h"
+#define _USE_MATH_DEFINES
 #include <math.h>
+//#include <x86intrin.h>
+#ifdef _MSC_VER
+#include <intrin.h>
+#else
 #include <x86intrin.h>
+#endif
 #include <string.h>
+#ifdef _WIN32
+#define ffsll __builtin_ffsll
+#endif
 
 /* Store a double-precision centered normal vector in vec.
  * Computation using Box-Muller. ANTRAG_D is assumed to be even.
