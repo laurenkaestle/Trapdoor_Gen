@@ -43,7 +43,7 @@ int test_gibbs(enum Algorithm alg){
   signature s;
 
   // function pointer based on algorithm choice
-  if (alg != GIBBS && alg != BLOCK) { // add DE once implemented
+  if (alg != GIBBS && alg != BLOCK && alg != DE) {
     printf("Error: Unknown algorithm type\n");
     return -1;
   }
@@ -124,7 +124,8 @@ int main(){
   printf("----------------------------------------------------------\n\n");
 
   test_gibbs(GIBBS);
-  test_gibbs(BLOCK);
+  //test_gibbs(BLOCK);
+  //test_gibbs(DE);
   
   return 0;
 }

@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 199309L // to use CLOCK_MONOTONIC
+
 #include "randombytes.h"
 
 #include <stdio.h>

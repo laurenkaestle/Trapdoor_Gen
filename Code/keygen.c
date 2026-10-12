@@ -13,7 +13,9 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <pthread.h>
 
+pthread_t chain[NUM_CHAINS];
 
 void write_array_to_file(int8_t f[ANTRAG_D], const char *filename) {
     FILE *file = fopen(filename, "a");
@@ -107,7 +109,7 @@ double update_xi(int d, double alpha, double *x, int i, double _r) {
 
     double lower_bound = 1.0 / (d / 2.0 * alpha * alpha - sum_other_x_inv);
     double upper_bound = d / 2.0 * alpha * alpha - sum_other_x;
-	
+
 	return lower_bound + (upper_bound - lower_bound) * _r;
 }
 
@@ -117,10 +119,10 @@ double update_xi(int d, double alpha, double *x, int i, double _r) {
  * 
  * author: Lauren Kaestle <lk2958@rit.edu>
  */
-int update_xi_xj(int d, double alpha, double *x, int i, int j, double *r) {
+void update_xi_xj(int d, double alpha, double *x, int i, int j, double _r[], uint64_t _rint[]) {
     double sum_other_x = 0.0;
     double sum_other_x_inv = 0.0;
-    int tries = 0;
+    //int tries = 0;
     double xi, xj;
 
     for (int k = 0; k < d / 2; k++) {
@@ -130,19 +132,54 @@ int update_xi_xj(int d, double alpha, double *x, int i, int j, double *r) {
         }
     }
 
-    double max_sum = d / 2.0 * alpha * alpha;
+    double max_sum = (d / 2) * alpha * alpha;
+    //printf("goal: %f %f\n", max_sum, sum_other_x);
     
-    double lower_bound = 1.0 / (max_sum - sum_other_x_inv);
-    double upper_bound = max_sum - sum_other_x;
-    double bound_diff = upper_bound - lower_bound;
+    while(1) {
+        // sample uniformly within triangle, reject if hyperbola requirement not met
+        // P = (1-sqrt(r1))A + (sqrt(r1)(1-r2))B + (r2sqrt(r1))C
+        xi = (max_sum - sum_other_x) * _r[j] * sqrt(_r[i]);
+        xj = (max_sum - sum_other_x) * sqrt(_r[i]) * (1.0 - _r[j]);
+        if (xi > 0 && xj > 0 && 1.0 / xi + 1.0 / xj <= max_sum - sum_other_x_inv) {
+            x[i] = xi;
+            x[j] = xj;
+            //printf("Randoms: %f %f\n", _r[i], _r[j]);
+            //printf("Updates: %f %f\n", x[i], x[j]);
+            break;
+        }
+        simple_frand(_r+i, _rint+i, 2); // keeps reusing same vals, try making separate frand function?
+        //tries++;  // test
+    }
+    // printf("repeats: %d\n", tries); // test
+}
 
-    // sample xi from region
-    xi = lower_bound + bound_diff * r[i];  
-    // sample xj from region based on xi
-    double new_lower_bound = 1.0 / (max_sum - sum_other_x_inv - 1.0 / xi);
-    xj = new_lower_bound + ((max_sum - sum_other_x - xi) - new_lower_bound) * r[j];
-
-    return tries;
+/**
+ * Function to carry out a sequential DE-MC update
+ * 
+ * For each coefficient, the function computes the difference between the two 
+ * randomly selected chains and uses this to compute what the update would be.
+ * If the updated coefficients are all still > 0 and meet the sum requirements,
+ * the update is carried out. Otherwise, there's no update for this iteration.
+ * 
+ * author: Lauren Kaestle <lk2958@rit.edu>
+ */
+void update_demc(int d, double alpha, double *x, double *a, double *b, double e) {
+    double gamma = 2.38 / sqrt(d);  // 2 * d/2 check this d matches d in DE-MC...
+    double sum_x = 0.0;
+    double sum_x_inv = 0.0;
+    double diff = 0.0;
+    double max_sum = (d / 2) * alpha * alpha;
+    for (int i = 0; i < d / 2; i++) {
+        diff = x[i] + gamma * (a[i] - b[i]) + e;
+        sum_x += diff;
+        sum_x_inv += 1.0 / diff;
+        if (diff < 0.0 || sum_x >= max_sum || sum_x_inv >= max_sum) {
+            return; // no update!
+        }
+    }
+    for (int i = 0; i < d / 2; i++) {
+        x[i] += gamma * (a[i] - b[i]) + e;
+    }
 }
 
 /**
@@ -158,9 +195,6 @@ int keygen_fg(secret_key *sk, enum Algorithm alg)
     double ANTRAG_ALPHA_PRIME = ANTRAG_ALPHA + 0.005;
     double Exit_bound = ANTRAG_D * 0.5 * ((ANTRAG_ALPHA_PRIME)*(ANTRAG_ALPHA_PRIME)) * ((double)ANTRAG_Q);
     
-    double r[2*ANTRAG_D];
-    uint64_t rint[2*ANTRAG_D];
-
     int trials=0, check;
     double x[ANTRAG_D / 2];
     for (int i = 0; i < ANTRAG_D / 2; i++) {
@@ -178,32 +212,62 @@ int keygen_fg(secret_key *sk, enum Algorithm alg)
                 x[i] = update_xi(ANTRAG_D, ANTRAG_ALPHA, x, i, _r[i]);
             }
         }
-    } else {
-        // should be BLOCK (for now)
+    } else if (alg == BLOCK) {
         for (int k = 0; k < Blocked_N; k++) {
-            // iterations of blocked Gibbs algorithm until reaching convergence
-            simple_frand(r, rint, ANTRAG_D / 2);
-            for (int i = 0; i < ANTRAG_D; i += 2) {
-                // call update_xi_xj, pass in pointers to xi and xj?
-                update_xi_xj(ANTRAG_D, ANTRAG_ALPHA, x, i, i+1, r);
+            simple_frand(_r, _rint, ANTRAG_D / 2);
+            for (int i = 0; i < ANTRAG_D / 2; i += 2) {
+                update_xi_xj(ANTRAG_D, ANTRAG_ALPHA, x, i, i+1, _r, _rint);
             }
         }
+    } else if (alg == DE) {
+        // DE-MC, done sequentially with NUM_CHAINS chains (for now)
+        double chains[NUM_CHAINS][ANTRAG_D / 2];
+        // 1. for each chain, perform an initial update using update_xi
+        for (int k = 0; k < NUM_CHAINS; k++) {
+            simple_frand(_r, _rint, ANTRAG_D / 2);
+            for (int i = 0; i < ANTRAG_D / 2; i++) {
+                // increase or decrease each element by a little bit
+                chains[k][i] = x[i] + (_r[i] * DE_START * 2) - DE_START;
+            }
+        }
+        // 2. for DE_N iterations, use demc_update
+        for (int k = 0; k < DE_N; k++) {
+            for (int i = 0; i < NUM_CHAINS; i++) {
+                simple_frand(_r, _rint, 3);
+                int c1 = _r[0] * (NUM_CHAINS - 1);
+                int c2 = _r[1] * (NUM_CHAINS - 1);
+                double err = _r[2] * DE_ERR;
+                if (c1 >= k) { c1++; }
+                if (c2 >= k) { c2++; }
+                update_demc(ANTRAG_D, ANTRAG_ALPHA, chains[i], chains[c1], chains[c2], err);
+            }
+        }
+        // 3. select one vector to use (TODO: edit how this is done!)
+        simple_frand(_r, _rint, 1);
+        int i = _r[0] * NUM_CHAINS;
+        for (int j = 0; j < ANTRAG_D / 2; j++) {
+            x[j] = chains[i][j];
+        }
+    } else {
+        return -1;
     }
+
+    printf("here!");
 
     do {
         trials++;
-        simple_frand(r, rint, 2*ANTRAG_D);
+        simple_frand(_r, _rint, 2*ANTRAG_D);
         // e^(iω)=cos⁡(ω)+i*sin(ω)
 
         for(size_t i=0; i<ANTRAG_D/2; i++) {
             z[i] = sqrt((double) ANTRAG_Q * x[i]);
 
-            af[i]            = z [i] * cos(M_PI/2*r[i]);              // x
-            ag[i]            = z [i] * sin(M_PI/2*r[i]);              // y
-            f [i]            = af[i] * cos(2*M_PI*r[i+1*ANTRAG_D/2]); // Real part of z
-            f [i+ANTRAG_D/2] = af[i] * sin(2*M_PI*r[i+1*ANTRAG_D/2]); // Imaginary part of z
-            g [i]            = ag[i] * cos(2*M_PI*r[i+2*ANTRAG_D/2]); // Real part of z prime
-            g [i+ANTRAG_D/2] = ag[i] * sin(2*M_PI*r[i+2*ANTRAG_D/2]); // Imaginary part of z prime
+            af[i]            = z [i] * cos(M_PI/2*_r[i]);              // x
+            ag[i]            = z [i] * sin(M_PI/2*_r[i]);              // y
+            f [i]            = af[i] * cos(2*M_PI*_r[i+1*ANTRAG_D/2]); // Real part of z
+            f [i+ANTRAG_D/2] = af[i] * sin(2*M_PI*_r[i+1*ANTRAG_D/2]); // Imaginary part of z
+            g [i]            = ag[i] * cos(2*M_PI*_r[i+2*ANTRAG_D/2]); // Real part of z prime
+            g [i+ANTRAG_D/2] = ag[i] * sin(2*M_PI*_r[i+2*ANTRAG_D/2]); // Imaginary part of z prime
         }
 
         for(size_t i=0; i<ANTRAG_D; i++) {
