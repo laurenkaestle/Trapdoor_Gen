@@ -13,9 +13,9 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <pthread.h>
+//#include <pthread.h>
 
-pthread_t chain[NUM_CHAINS];
+//pthread_t chain[NUM_CHAINS];
 
 void write_array_to_file(int8_t f[ANTRAG_D], const char *filename) {
     FILE *file = fopen(filename, "a");
@@ -45,6 +45,12 @@ static void simple_frand(double *r, uint64_t *buf, size_t n) {
     }
 }
 
+// generates single random value
+double single_rng() {
+    uint64_t rand_int = get64();
+    double rand_double = (double)rand_int / (double)UINT64_MAX;
+    return rand_double;
+}
 
 /* 
  * Decode a real vector as an integer vector with odd sum.
@@ -119,10 +125,9 @@ double update_xi(int d, double alpha, double *x, int i, double _r) {
  * 
  * author: Lauren Kaestle <lk2958@rit.edu>
  */
-void update_xi_xj(int d, double alpha, double *x, int i, int j, double _r[], uint64_t _rint[]) {
+void update_xi_xj(int d, double alpha, double *x, int i, int j) {
     double sum_other_x = 0.0;
     double sum_other_x_inv = 0.0;
-    //int tries = 0;
     double xi, xj;
 
     for (int k = 0; k < d / 2; k++) {
@@ -132,25 +137,30 @@ void update_xi_xj(int d, double alpha, double *x, int i, int j, double _r[], uin
         }
     }
 
-    double max_sum = (d / 2) * alpha * alpha;
-    //printf("goal: %f %f\n", max_sum, sum_other_x);
+    double max_sum = (d / 2.0) * alpha * alpha;
     
+    // find min and max xi and xj to build sampling triangle
+    double bound1 = max_sum - sum_other_x;
+    double bound2 = max_sum - sum_other_x_inv;
+    double x_min = (bound1 - sqrt(bound1 * (bound1 - 4.0 / bound2))) / 2.0;
+    double x_max = (bound1 + sqrt(bound1 * (bound1 - 4.0 / bound2))) / 2.0;
+
     while(1) {
         // sample uniformly within triangle, reject if hyperbola requirement not met
+        // A = (xmin, xmin), B=(xmin, xmax), C=(xmax, xmin)
         // P = (1-sqrt(r1))A + (sqrt(r1)(1-r2))B + (r2sqrt(r1))C
-        xi = (max_sum - sum_other_x) * _r[j] * sqrt(_r[i]);
-        xj = (max_sum - sum_other_x) * sqrt(_r[i]) * (1.0 - _r[j]);
+        double r1 = single_rng();
+        double r2 = single_rng();
+        //xi = (max_sum - sum_other_x) * r2 * sqrt(r1);
+        //xj = (max_sum - sum_other_x) * sqrt(r1) * (1.0 - r2);
+        xi = x_min * ((1.0 - sqrt(r1)) + sqrt(r1) * (1.0 - r2)) + x_max * r2 * sqrt(r1);
+        xj = x_min * ((1.0 - sqrt(r1)) + r2 * sqrt(r1)) + x_max * sqrt(r1) * (1.0 - r2);
         if (xi > 0 && xj > 0 && 1.0 / xi + 1.0 / xj <= max_sum - sum_other_x_inv) {
             x[i] = xi;
             x[j] = xj;
-            //printf("Randoms: %f %f\n", _r[i], _r[j]);
-            //printf("Updates: %f %f\n", x[i], x[j]);
             break;
         }
-        simple_frand(_r+i, _rint+i, 2); // keeps reusing same vals, try making separate frand function?
-        //tries++;  // test
     }
-    // printf("repeats: %d\n", tries); // test
 }
 
 /**
@@ -164,16 +174,19 @@ void update_xi_xj(int d, double alpha, double *x, int i, int j, double _r[], uin
  * author: Lauren Kaestle <lk2958@rit.edu>
  */
 void update_demc(int d, double alpha, double *x, double *a, double *b, double e) {
-    double gamma = 2.38 / sqrt(d);  // 2 * d/2 check this d matches d in DE-MC...
+    double gamma = 2.38 / sqrt(d);
     double sum_x = 0.0;
     double sum_x_inv = 0.0;
     double diff = 0.0;
     double max_sum = (d / 2) * alpha * alpha;
     for (int i = 0; i < d / 2; i++) {
         diff = x[i] + gamma * (a[i] - b[i]) + e;
+        if (diff <= 0.0) {
+            return;
+        }
         sum_x += diff;
         sum_x_inv += 1.0 / diff;
-        if (diff < 0.0 || sum_x >= max_sum || sum_x_inv >= max_sum) {
+        if (sum_x > max_sum || sum_x_inv > max_sum) {
             return; // no update!
         }
     }
@@ -213,13 +226,14 @@ int keygen_fg(secret_key *sk, enum Algorithm alg)
             }
         }
     } else if (alg == BLOCK) {
+        seed_rng();
         for (int k = 0; k < Blocked_N; k++) {
-            simple_frand(_r, _rint, ANTRAG_D / 2);
             for (int i = 0; i < ANTRAG_D / 2; i += 2) {
-                update_xi_xj(ANTRAG_D, ANTRAG_ALPHA, x, i, i+1, _r, _rint);
+                update_xi_xj(ANTRAG_D, ANTRAG_ALPHA, x, i, i+1);
             }
         }
     } else if (alg == DE) {
+        seed_rng();
         // DE-MC, done sequentially with NUM_CHAINS chains (for now)
         double chains[NUM_CHAINS][ANTRAG_D / 2];
         // 1. for each chain, perform an initial update using update_xi
@@ -233,26 +247,55 @@ int keygen_fg(secret_key *sk, enum Algorithm alg)
         // 2. for DE_N iterations, use demc_update
         for (int k = 0; k < DE_N; k++) {
             for (int i = 0; i < NUM_CHAINS; i++) {
-                simple_frand(_r, _rint, 3);
-                int c1 = _r[0] * (NUM_CHAINS - 1);
-                int c2 = _r[1] * (NUM_CHAINS - 1);
-                double err = _r[2] * DE_ERR;
-                if (c1 >= k) { c1++; }
-                if (c2 >= k) { c2++; }
-                update_demc(ANTRAG_D, ANTRAG_ALPHA, chains[i], chains[c1], chains[c2], err);
+                // randomly select two other chains for the update
+                int i1, i2;
+                do {
+                    i1 = rand() % NUM_CHAINS;
+                } while (i1 == i);
+                do {
+                    i2 = rand() % NUM_CHAINS;
+                } while (i2 == i || i2 == i1);
+                // randomly generate the amount of error for this update
+                double err = single_rng() * DE_ERR;
+                update_demc(ANTRAG_D, ANTRAG_ALPHA, chains[i], chains[i1], chains[i2], err);
             }
         }
-        // 3. select one vector to use (TODO: edit how this is done!)
-        simple_frand(_r, _rint, 1);
-        int i = _r[0] * NUM_CHAINS;
-        for (int j = 0; j < ANTRAG_D / 2; j++) {
-            x[j] = chains[i][j];
+        // 3. select vector to use, start by taking avg for each coord
+        double sum_x = 0.0;
+        double sum_x_inv = 0.0;
+        double max_sum = (ANTRAG_D / 2.0) * ANTRAG_ALPHA * ANTRAG_ALPHA;
+        for (int i = 0; i < ANTRAG_D / 2; i++) {
+            x[i] = 0.0;
+            for (int j = 0; j < NUM_CHAINS; j++) {
+                x[i] += chains[j][i];
+            }
+            x[i] /= DE_N;
+            sum_x += x[i];
+            sum_x_inv += 1.0 / x[i];
+        }
+        if (sum_x > max_sum || sum_x_inv > max_sum) {
+            // for now, if this fails to meet requirements, just select chain randomly
+            // going forward, could also use a metric to pick "best" chain
+            int i = single_rng() * NUM_CHAINS;
+            for (int j = 0; j < ANTRAG_D / 2; j++) {
+                x[j] = chains[i][j];
+            }
         }
     } else {
         return -1;
     }
 
-    printf("here!");
+    // For testing that coefficients generated meet requirements (will delete after testing):
+    printf("TEST:\n");
+    double test_sum = 0.0;
+    double test_inv = 0.0;
+    for (int i = 0; i < ANTRAG_D/2; i++) {
+        printf("%f ", x[i]);
+        test_sum += x[i];
+        test_inv += 1.0 / x[i];
+    }
+    printf("\n%f, %f, %f\n", test_sum, test_inv, (ANTRAG_D / 2.0) * ANTRAG_ALPHA * ANTRAG_ALPHA);
+    
 
     do {
         trials++;
@@ -280,8 +323,8 @@ int keygen_fg(secret_key *sk, enum Algorithm alg)
         // Convert real vector to integer vector
         decode_odd(sk->f, &(sk->b10));
         decode_odd(sk->g, &(sk->b11));
-        // Simple_Rounding(sk->f, &(sk->b10));
-        // Simple_Rounding(sk->g, &(sk->b11));
+        //Simple_Rounding(sk->f, &(sk->b10));
+        //Simple_Rounding(sk->g, &(sk->b11));
 
         for(size_t i=0; i<ANTRAG_D; i++) {
             sk->b10.coeffs[i].v = (double)sk->f[i];
@@ -312,7 +355,7 @@ int keygen_fg(secret_key *sk, enum Algorithm alg)
         if(zi_sum > Exit_bound || zi_inv_sum > Exit_bound) {
           check = 1;
         }
-        
+
     } while(check); 
 	// write_array_to_file(sk->f, "output.txt");
 	// write_array_to_file(sk->g, "output.txt");

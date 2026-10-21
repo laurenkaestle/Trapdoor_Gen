@@ -123,7 +123,7 @@ int test_gibbs(enum Algorithm alg){
 int main(){
   printf("----------------------------------------------------------\n\n");
 
-  test_gibbs(GIBBS);
+  //test_gibbs(GIBBS);
   //test_gibbs(BLOCK);
   //test_gibbs(DE);
   

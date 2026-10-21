@@ -12,10 +12,11 @@
 
 #define Gibbs_N 2500
 // for testing, will update based on final convergence calculation:
-#define Blocked_N 2
-#define DE_N 2
+#define Blocked_N 2500
+#define DE_N 2500
 #define DE_ERR 0.00001 //can adjust as needed
-#define DE_START 0.01 //can adjust as needed
+#define DE_START 0.02 
+// ^TODO: add proof to report showing why this stays in target range for initial update
 #define NUM_CHAINS 5
 
 /* sigma^2 = r^2 * alpha^2 * q */
