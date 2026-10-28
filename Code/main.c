@@ -37,7 +37,6 @@ int doublecmp(const void *x, const void *y)
 int test_gibbs(enum Algorithm alg){
   srand(time(0));
   seed_rng();
-  printf("Hello world, signature is %s-%u\n", (alg == GIBBS) ? "Gibbs-Falcon" : "Blocked-Gibbs-Falcon", ANTRAG_D);
   secret_key sk;
   public_key pk;
   signature s;
@@ -47,6 +46,10 @@ int test_gibbs(enum Algorithm alg){
     printf("Error: Unknown algorithm type\n");
     return -1;
   }
+
+  printf("Hello world, signature is %s-%u\n", 
+    (alg == GIBBS) ? "Gibbs-Falcon" : (alg == BLOCK) ? "Blocked-Gibbs-Falcon" : "DE-MC-Falcon", 
+    ANTRAG_D);
 
   uint8_t m[32] = {0x46,0xb6,0xc4,0x83,0x3f,0x61,0xfa,0x3e,0xaa,0xe9,0xad,0x4a,0x68,0x8c,0xd9,0x6e,0x22,0x6d,0x93,0x3e,0xde,0xc4,0x64,0x9a,0xb2,0x18,0x45,0x2,0xad,0xf3,0xc,0x61};
   
@@ -120,12 +123,32 @@ int test_gibbs(enum Algorithm alg){
 
 }
 
+/**
+ * Function to perform key generation and write results of each iteration
+ * to an output file for convergence calculations. Before running this,
+ * make sure the calls to write_coeffs_to_file are not commented out and any
+ * folders that will store output exist.
+ * 
+ * author: Lauren Kaestle <lk2958@rit.edu>
+ */
+void generate_outfile(enum Algorithm alg) {
+  secret_key sk;
+  printf("\n* Generate key pair and output file.\n");
+  int res_trials = keygen_fg(&sk, alg);
+  printf("  res_trials = %d\n", res_trials);
+  printf("  ...done.\n\n");
+  printf("----------------------------------------------------------\n\n");
+}
+
 int main(){
   printf("----------------------------------------------------------\n\n");
 
-  //test_gibbs(GIBBS);
+  test_gibbs(GIBBS);
   //test_gibbs(BLOCK);
   //test_gibbs(DE);
+  //generate_outfile(GIBBS);
+  //generate_outfile(BLOCK);
+  //generate_outfile(DE);
   
   return 0;
 }

@@ -13,9 +13,6 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-//#include <pthread.h>
-
-//pthread_t chain[NUM_CHAINS];
 
 void write_array_to_file(int8_t f[ANTRAG_D], const char *filename) {
     FILE *file = fopen(filename, "a");
@@ -32,6 +29,29 @@ void write_array_to_file(int8_t f[ANTRAG_D], const char *filename) {
         }
     }
     fprintf(file, "]\n");
+
+    fclose(file);
+}
+
+/**
+ * Based on write_array_to_file, but for convergence tests.
+ * 
+ * author: Lauren Kaestle <lk2958@rit.edu>
+ */
+void write_coeffs_to_file(double x[ANTRAG_D/2], const char *filename) {
+    FILE *file = fopen(filename, "a");
+    if (file == NULL) {
+        perror("Error opening file");
+        return;
+    }
+
+    for (int i = 0; i < ANTRAG_D / 2; i++) {
+        fprintf(file, "%f", x[i]);
+        if (i < ANTRAG_D / 2 - 1) {
+            fprintf(file, ", ");
+        }
+    }
+    fprintf(file, "\n");
 
     fclose(file);
 }
@@ -128,7 +148,7 @@ double update_xi(int d, double alpha, double *x, int i, double _r) {
 void update_xi_xj(int d, double alpha, double *x, int i, int j) {
     double sum_other_x = 0.0;
     double sum_other_x_inv = 0.0;
-    double xi, xj;
+    double xi, xj, r1, r2;
 
     for (int k = 0; k < d / 2; k++) {
         if (k != i && k != j) {
@@ -149,10 +169,8 @@ void update_xi_xj(int d, double alpha, double *x, int i, int j) {
         // sample uniformly within triangle, reject if hyperbola requirement not met
         // A = (xmin, xmin), B=(xmin, xmax), C=(xmax, xmin)
         // P = (1-sqrt(r1))A + (sqrt(r1)(1-r2))B + (r2sqrt(r1))C
-        double r1 = single_rng();
-        double r2 = single_rng();
-        //xi = (max_sum - sum_other_x) * r2 * sqrt(r1);
-        //xj = (max_sum - sum_other_x) * sqrt(r1) * (1.0 - r2);
+        r1 = single_rng();
+        r2 = single_rng();
         xi = x_min * ((1.0 - sqrt(r1)) + sqrt(r1) * (1.0 - r2)) + x_max * r2 * sqrt(r1);
         xj = x_min * ((1.0 - sqrt(r1)) + r2 * sqrt(r1)) + x_max * sqrt(r1) * (1.0 - r2);
         if (xi > 0 && xj > 0 && 1.0 / xi + 1.0 / xj <= max_sum - sum_other_x_inv) {
@@ -208,41 +226,48 @@ int keygen_fg(secret_key *sk, enum Algorithm alg)
     double ANTRAG_ALPHA_PRIME = ANTRAG_ALPHA + 0.005;
     double Exit_bound = ANTRAG_D * 0.5 * ((ANTRAG_ALPHA_PRIME)*(ANTRAG_ALPHA_PRIME)) * ((double)ANTRAG_Q);
     
+    double r[2*ANTRAG_D];
+	uint64_t rint[2*ANTRAG_D];
+
     int trials=0, check;
     double x[ANTRAG_D / 2];
     for (int i = 0; i < ANTRAG_D / 2; i++) {
         x[i] = 1.0;
     }
-
-	double _r[ANTRAG_D / 2];
-	uint64_t _rint[ ANTRAG_D / 2];
 	
-    // edited to allow different approaches:
+    // edited to allow different approaches
+    // remove comments on write_array_to_file to create output file for convergence tests
     if (alg == GIBBS) {
+        //write_coeffs_to_file(x, "gibbs_convergence/gibbs.txt");
         for (int k = 0; k < Gibbs_N; k++) {
-		    simple_frand(_r, _rint, ANTRAG_D / 2);
+		    simple_frand(r, rint, ANTRAG_D / 2);
             for (int i = 0; i < ANTRAG_D / 2; i++) {
-                x[i] = update_xi(ANTRAG_D, ANTRAG_ALPHA, x, i, _r[i]);
+                x[i] = update_xi(ANTRAG_D, ANTRAG_ALPHA, x, i, r[i]);
             }
+            //write_coeffs_to_file(x, "gibbs_convergence/gibbs.txt");
         }
     } else if (alg == BLOCK) {
-        seed_rng();
+        //write_coeffs_to_file(x, "blocked_convergence/blocked.txt");
         for (int k = 0; k < Blocked_N; k++) {
             for (int i = 0; i < ANTRAG_D / 2; i += 2) {
                 update_xi_xj(ANTRAG_D, ANTRAG_ALPHA, x, i, i+1);
             }
+            //write_coeffs_to_file(x, "blocked_convergence/blocked.txt");
         }
     } else if (alg == DE) {
-        seed_rng();
         // DE-MC, done sequentially with NUM_CHAINS chains (for now)
         double chains[NUM_CHAINS][ANTRAG_D / 2];
-        // 1. for each chain, perform an initial update using update_xi
+        //char chain_files[NUM_CHAINS][FNAME_SIZE];
+        // 1. for each chain, perform an initial update
         for (int k = 0; k < NUM_CHAINS; k++) {
-            simple_frand(_r, _rint, ANTRAG_D / 2);
+            simple_frand(r, rint, ANTRAG_D / 2);
             for (int i = 0; i < ANTRAG_D / 2; i++) {
                 // increase or decrease each element by a little bit
-                chains[k][i] = x[i] + (_r[i] * DE_START * 2) - DE_START;
+                chains[k][i] = x[i] + (r[i] * DE_START * 2) - DE_START;
             }
+            // store file name for each chain, write initial chain to file
+            //snprintf(chain_files[k], FNAME_SIZE, "demc_convergence/chain%d.txt", k);
+            //write_coeffs_to_file(chains[k], chain_files[k]);
         }
         // 2. for DE_N iterations, use demc_update
         for (int k = 0; k < DE_N; k++) {
@@ -258,6 +283,8 @@ int keygen_fg(secret_key *sk, enum Algorithm alg)
                 // randomly generate the amount of error for this update
                 double err = single_rng() * DE_ERR;
                 update_demc(ANTRAG_D, ANTRAG_ALPHA, chains[i], chains[i1], chains[i2], err);
+                // write update to this chain's file
+                //write_coeffs_to_file(chains[i], chain_files[i]);
             }
         }
         // 3. select vector to use, start by taking avg for each coord
@@ -286,7 +313,7 @@ int keygen_fg(secret_key *sk, enum Algorithm alg)
     }
 
     // For testing that coefficients generated meet requirements (will delete after testing):
-    printf("TEST:\n");
+    /*printf("TEST:\n");
     double test_sum = 0.0;
     double test_inv = 0.0;
     for (int i = 0; i < ANTRAG_D/2; i++) {
@@ -294,23 +321,23 @@ int keygen_fg(secret_key *sk, enum Algorithm alg)
         test_sum += x[i];
         test_inv += 1.0 / x[i];
     }
-    printf("\n%f, %f, %f\n", test_sum, test_inv, (ANTRAG_D / 2.0) * ANTRAG_ALPHA * ANTRAG_ALPHA);
+    printf("\n%f, %f, %f\n", test_sum, test_inv, (ANTRAG_D / 2.0) * ANTRAG_ALPHA * ANTRAG_ALPHA);*/
     
 
     do {
         trials++;
-        simple_frand(_r, _rint, 2*ANTRAG_D);
+        simple_frand(r, rint, 2*ANTRAG_D);
         // e^(iω)=cos⁡(ω)+i*sin(ω)
 
         for(size_t i=0; i<ANTRAG_D/2; i++) {
             z[i] = sqrt((double) ANTRAG_Q * x[i]);
 
-            af[i]            = z [i] * cos(M_PI/2*_r[i]);              // x
-            ag[i]            = z [i] * sin(M_PI/2*_r[i]);              // y
-            f [i]            = af[i] * cos(2*M_PI*_r[i+1*ANTRAG_D/2]); // Real part of z
-            f [i+ANTRAG_D/2] = af[i] * sin(2*M_PI*_r[i+1*ANTRAG_D/2]); // Imaginary part of z
-            g [i]            = ag[i] * cos(2*M_PI*_r[i+2*ANTRAG_D/2]); // Real part of z prime
-            g [i+ANTRAG_D/2] = ag[i] * sin(2*M_PI*_r[i+2*ANTRAG_D/2]); // Imaginary part of z prime
+            af[i]            = z [i] * cos(M_PI/2*r[i]);              // x
+            ag[i]            = z [i] * sin(M_PI/2*r[i]);              // y
+            f [i]            = af[i] * cos(2*M_PI*r[i+1*ANTRAG_D/2]); // Real part of z
+            f [i+ANTRAG_D/2] = af[i] * sin(2*M_PI*r[i+1*ANTRAG_D/2]); // Imaginary part of z
+            g [i]            = ag[i] * cos(2*M_PI*r[i+2*ANTRAG_D/2]); // Real part of z prime
+            g [i+ANTRAG_D/2] = ag[i] * sin(2*M_PI*r[i+2*ANTRAG_D/2]); // Imaginary part of z prime
         }
 
         for(size_t i=0; i<ANTRAG_D; i++) {

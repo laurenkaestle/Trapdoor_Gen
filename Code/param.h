@@ -15,9 +15,9 @@
 #define Blocked_N 2500
 #define DE_N 2500
 #define DE_ERR 0.00001 //can adjust as needed
-#define DE_START 0.02 
-// ^TODO: add proof to report showing why this stays in target range for initial update
-#define NUM_CHAINS 5
+#define DE_START 0.02
+#define NUM_CHAINS (ANTRAG_D * 3) / 4
+#define FNAME_SIZE 32
 
 /* sigma^2 = r^2 * alpha^2 * q */
 /* gamma^2 = slack^2 * sigma^2 * 2d */

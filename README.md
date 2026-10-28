@@ -8,15 +8,15 @@ This folder contains the implementation of the different trapdoor generation app
 
 For this project, I have added and edited the following files:
 
-- keygen.c has been edited to also handle blocked Gibbs
-- main.c has been edited to test both implemented approaches
+- keygen.c has been edited to also handle blocked Gibbs and DE-MC
+- main.c has been edited to test all samplers
+- param.h edited to add necessary macros for new algorithms
 - other files have been edited to handle compilation issues on my laptop
+- ConvergenceR.ipynb added for diagnostics to check when samplers are expected to reach convergence
 
-## Milestone 1
+## Convergence Calculations
 
-The following files have been included as part of the milestone 1 submission:
-
-- edits to keygen.c and main.c in the Code folder
+The code for the convergence calculations that have been done so far is written in a combination of Python and R so that R's BOA package can be used. The Colab document with this code has been included in this repository.
 
 ## Authors
 
